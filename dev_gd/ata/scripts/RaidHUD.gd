@@ -9,6 +9,22 @@ const INV_ROWS := 5
 const INV_CELL := 44
 const INV_PAD  := 10
 
+# ─── Action bar ───────────────────────────────────────────────────────────────
+const AB_W          := 520.0
+const AB_H          := 110.0
+const AB_BAR_H      := 8.0
+const AB_BTN_R      := 36.0   # circle button radius
+const AB_BTN_GAP    := 10.0   # circle button distance from panel edge
+const AB_SQ         := 40.0   # square button size
+const AB_SQ_COUNT   := 6
+
+# ─── Action bar button center helpers ────────────────────────────────────────
+func _ab_repair_center(vsize: Vector2) -> Vector2:
+	var ox    := vsize.x * 0.5 - AB_W * 0.5
+	var oy    := vsize.y - AB_H
+	var btn_cy := oy + AB_BAR_H + (AB_H - AB_BAR_H * 2.0) * 0.5
+	return Vector2(ox + AB_BTN_GAP + AB_BTN_R, btn_cy)
+
 # ─── Inventory origin: top-right ─────────────────────────────────────────────
 func _inv_origin(vsize: Vector2) -> Vector2:
 	return Vector2(
@@ -33,6 +49,15 @@ func _input(event: InputEvent) -> void:
 	if not pressed: return
 
 	var vsize  := get_viewport_rect().size
+
+	# ── Repair button (left circle) ───────────────────────────────────────────
+	var repair_c := _ab_repair_center(vsize)
+	if pos.distance_to(repair_c) <= AB_BTN_R:
+		raid.shield = raid.MAX_SHIELD
+		get_viewport().set_input_as_handled()
+		return
+
+	# ── Inventory drop ────────────────────────────────────────────────────────
 	var origin := _inv_origin(vsize)
 	if pos.x < origin.x or pos.x > origin.x + INV_COLS * INV_CELL: return
 	if pos.y < origin.y or pos.y > origin.y + INV_ROWS * INV_CELL: return
@@ -48,6 +73,7 @@ func _draw() -> void:
 	_draw_arrow(vsize)
 	_draw_extract_bar(vsize)
 	_draw_inventory(vsize)
+	_draw_action_bar(vsize)
 	_draw_joysticks(vsize)
 
 # ─── Direction arrow ─────────────────────────────────────────────────────────
@@ -66,10 +92,6 @@ func _draw_arrow(vsize: Vector2) -> void:
 		tip + Vector2( -8.0,  7.0).rotated(angle),
 	])
 	draw_colored_polygon(pts, Color(1.0, 1.0, 1.0, 0.55))
-	draw_string(ThemeDB.fallback_font,
-		Vector2(center.x - 84.0, vsize.y - 16.0),
-		"探索地图以找到撤离点",
-		HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.30))
 
 # ─── Extraction progress bar ─────────────────────────────────────────────────
 func _draw_extract_bar(vsize: Vector2) -> void:
@@ -125,6 +147,92 @@ func _draw_inventory(vsize: Vector2) -> void:
 				"¥%d" % itype["value"], HORIZONTAL_ALIGNMENT_LEFT, -1, 9,
 				Color(0, 0, 0, 0.85))
 
+# ─── Action bar (bottom-centre) ──────────────────────────────────────────────
+func _draw_action_bar(vsize: Vector2) -> void:
+	var ox := vsize.x * 0.5 - AB_W * 0.5
+	var oy := vsize.y - AB_H
+
+	# Background
+	draw_rect(Rect2(ox, oy, AB_W, AB_H), Color(0.0, 0.0, 0.0, 0.72))
+	# Border
+	draw_rect(Rect2(ox, oy, AB_W, AB_H), Color(1.0, 1.0, 1.0, 0.18), false, 1.0)
+
+	# ── Top progress bar (shield, white) ─────────────────────────────────────
+	var shield_ratio := float(raid.shield) / float(raid.MAX_SHIELD)
+	draw_rect(Rect2(ox, oy, AB_W, AB_BAR_H), Color(1.0, 1.0, 1.0, 0.10))
+	draw_rect(Rect2(ox, oy, AB_W * shield_ratio, AB_BAR_H), Color(1.0, 1.0, 1.0, 0.70))
+	draw_rect(Rect2(ox, oy, AB_W, AB_BAR_H), Color(1.0, 1.0, 1.0, 0.25), false, 1.0)
+
+	# ── Bottom progress bar (hp, red) ─────────────────────────────────────────
+	var hp_ratio := float(raid.hp) / float(raid.MAX_HP)
+	var bot_bar_y := oy + AB_H - AB_BAR_H
+	draw_rect(Rect2(ox, bot_bar_y, AB_W, AB_BAR_H), Color(1.0, 1.0, 1.0, 0.10))
+	draw_rect(Rect2(ox, bot_bar_y, AB_W * hp_ratio, AB_BAR_H), Color(0.85, 0.18, 0.18, 0.90))
+	draw_rect(Rect2(ox, bot_bar_y, AB_W, AB_BAR_H), Color(1.0, 1.0, 1.0, 0.25), false, 1.0)
+
+	# Vertical centre of button row (between the two bars)
+	var btn_cy := oy + AB_BAR_H + (AB_H - AB_BAR_H * 2.0) * 0.5
+
+	# ── Left circle button (repair) ────────────────────────────────────────────
+	var lc := Vector2(ox + AB_BTN_GAP + AB_BTN_R, btn_cy)
+	draw_circle(lc, AB_BTN_R, Color(1.0, 1.0, 1.0, 0.08))
+	draw_arc(lc, AB_BTN_R, 0.0, TAU, 48, Color(1.0, 1.0, 1.0, 0.45), 1.5)
+	_draw_icon_wrench(lc, AB_BTN_R * 0.52, Color(1.0, 1.0, 1.0, 0.80))
+
+	# ── Right circle button (backpack) ─────────────────────────────────────────
+	var rc := Vector2(ox + AB_W - AB_BTN_GAP - AB_BTN_R, btn_cy)
+	draw_circle(rc, AB_BTN_R, Color(1.0, 1.0, 1.0, 0.08))
+	draw_arc(rc, AB_BTN_R, 0.0, TAU, 48, Color(1.0, 1.0, 1.0, 0.45), 1.5)
+	_draw_icon_backpack(rc, AB_BTN_R * 0.52, Color(1.0, 1.0, 1.0, 0.80))
+
+	# ── 6 square buttons (evenly spaced between circle buttons) ───────────────
+	var sq_area_start := lc.x + AB_BTN_R
+	var sq_area_end   := rc.x - AB_BTN_R
+	var sq_area_w     := sq_area_end - sq_area_start
+	var sq_spacing    := sq_area_w / float(AB_SQ_COUNT)
+	for i in range(AB_SQ_COUNT):
+		var cx := sq_area_start + sq_spacing * (float(i) + 0.5)
+		var sx := cx - AB_SQ * 0.5
+		var sy := btn_cy - AB_SQ * 0.5
+		draw_rect(Rect2(sx, sy, AB_SQ, AB_SQ), Color(1.0, 1.0, 1.0, 0.08))
+		draw_rect(Rect2(sx, sy, AB_SQ, AB_SQ), Color(1.0, 1.0, 1.0, 0.35), false, 1.0)
+
+# ─── Minimalist icons ────────────────────────────────────────────────────────
+# Backpack: rect body + top strap arc + pocket divider line
+func _draw_icon_backpack(c: Vector2, s: float, col: Color) -> void:
+	var lw := 1.5
+	# Body outline
+	draw_rect(Rect2(c.x - s * 0.44, c.y - s * 0.44, s * 0.88, s * 0.90), col, false, lw)
+	# Top strap arc (handle bump)
+	draw_arc(c + Vector2(0.0, -s * 0.44), s * 0.20, PI, TAU, 14, col, lw)
+	# Pocket divider line
+	draw_line(
+		c + Vector2(-s * 0.44, s * 0.12),
+		c + Vector2( s * 0.44, s * 0.12),
+		col, lw)
+
+# Wrench: diagonal handle line + open C-head arc at top-right end
+func _draw_icon_wrench(c: Vector2, s: float, col: Color) -> void:
+	var lw := 2.0
+	var angle := -PI * 0.25   # 45° NE direction
+	var dir   := Vector2(cos(angle), sin(angle))
+	var perp  := Vector2(-dir.y, dir.x)
+	# Handle
+	var tip  := c + dir * s * 0.55
+	var tail := c - dir * s * 0.55
+	draw_line(tail, tip - dir * s * 0.22, col, lw)
+	# Wrench head: open arc (C-shape) centred at tip
+	var head_r := s * 0.30
+	# Opening gap aligned along handle direction → arc spans ~270°
+	var gap_start := angle - PI * 0.35
+	var gap_end   := angle + PI * 0.35
+	draw_arc(tip, head_r, gap_end, gap_start + TAU, 24, col, lw)
+	# Tiny jaw lines to complete the wrench jaw look
+	draw_line(tip + Vector2(cos(gap_start), sin(gap_start)) * head_r,
+			  tip + Vector2(cos(gap_start), sin(gap_start)) * (head_r + s * 0.12), col, lw)
+	draw_line(tip + Vector2(cos(gap_end),   sin(gap_end))   * head_r,
+			  tip + Vector2(cos(gap_end),   sin(gap_end))   * (head_r + s * 0.12), col, lw)
+
 # ─── Joystick visuals ─────────────────────────────────────────────────────────
 func _draw_joysticks(vsize: Vector2) -> void:
 	if not _touch: return
@@ -134,10 +242,10 @@ func _draw_joysticks(vsize: Vector2) -> void:
 	var lc := _touch.left_center
 	# Sprint glow
 	if _touch.is_sprinting:
-		for i in range(6, 0, -1):
-			var t := float(i) / 6.0
-			draw_arc(lc, TouchInput.LEFT_R + t * 14.0, 0.0, TAU, 64,
-				Color(1.0, 1.0, 1.0, 0.12 * (1.0 - t + 0.1)), 3.0 + t * 2.0)
+		for i in range(20, 0, -1):
+			var t := float(i) / 20.0
+			draw_arc(lc, TouchInput.LEFT_R + t * 20.0, 0.0, TAU, 64,
+				Color(1.0, 1.0, 1.0, 0.06 * (1.0 - t)), 3.0)
 	# Outer boundary ring
 	var ring_col := Color(1.0, 1.0, 1.0, 0.80) if _touch.is_sprinting else Color(1, 1, 1, 0.18)
 	draw_arc(lc, TouchInput.LEFT_R, 0.0, TAU, 64, ring_col, 2.0)

@@ -26,9 +26,23 @@ const RECOIL_RECOVERY   := 25.0 * PI / 180.0   # rad/s recovery when not firing
 
 # ─── Colours ──────────────────────────────────────────────────────────────────
 const C_WALL   := Color(0.067, 0.067, 0.067)
-const C_FLOOR  := Color(0.910, 0.910, 0.910)
+const C_FLOOR  := Color(0.500, 0.500, 0.500)
 const C_GRID   := Color(0.0,   0.0,   0.0,  0.10)
 const C_BULLET := Color(3.0, 2.5, 0.2)   # HDR yellow → bloom
+const C_ENEMY_BULLET := Color(3.0, 0.5, 0.3)  # HDR red-orange → bloom
+
+# ─── Enemy constants ──────────────────────────────────────────────────────────
+const ENEMY_COUNT_MIN  := 12
+const ENEMY_COUNT_MAX  := 18
+const ENEMY_R          := 13.0
+const ENEMY_SPD        := 65.0
+const ENEMY_SPRINT_SPD := 110.0
+const ENEMY_SENSE_R    := 200.0   # aggro range
+const ENEMY_CHASE_R    := 350.0   # keep chasing up to this distance
+const ENEMY_SHOOT_R    := 260.0   # start shooting within this range
+const ENEMY_FIRE_RATE  := 0.55
+const ENEMY_HP         := 60
+const ENEMY_DMG        := 8       # damage per bullet to player
 
 # ─── State ────────────────────────────────────────────────────────────────────
 var tiles               : Array              = []
@@ -47,6 +61,18 @@ var _fire_cooldown      : float              = 0.0
 var _pulse_t            : float              = 0.0
 var _fog_polygon        : PackedVector2Array = PackedVector2Array()
 var _current_spread     : float              = SPREAD_HALF
+
+# ─── Player stats ─────────────────────────────────────────────────────────────
+const MAX_HP     := 100
+const MAX_SHIELD := 100
+var hp     : int = MAX_HP
+var shield : int = MAX_SHIELD
+
+# ─── Enemies ──────────────────────────────────────────────────────────────────
+# Each enemy: { pos, hp, state, patrol_target, fire_cd, facing }
+# state: 0=PATROL  1=CHASE  2=SHOOT
+var enemies        : Array = []
+var enemy_bullets  : Array = []   # { pos, dir, traveled }
 
 @onready var _camera      : Camera2D    = $Camera2D
 @onready var _hud         : Node2D      = $HUD/HUDDraw
@@ -67,6 +93,7 @@ func _ready() -> void:
 	_camera.zoom     = Vector2(ZOOM, ZOOM)
 	_camera.position = player_pos
 	_hud.raid        = self
+	_spawn_enemies()
 
 	# Size SubViewport to match main viewport
 	_resize_fog_viewport()
@@ -92,6 +119,8 @@ func _process(delta: float) -> void:
 	_update_fog_polygon()
 	_update_items()
 	_update_extraction(delta)
+	_update_enemies(delta)
+	_update_enemy_bullets(delta)
 	_pulse_t         += delta
 	_camera.position  = player_pos
 	# Sync fog camera to main camera
@@ -200,6 +229,136 @@ func _update_items() -> void:
 			if inventory.try_add(item["type"]):
 				item["collected"] = true
 
+# ─── Enemy spawn ──────────────────────────────────────────────────────────────
+func _spawn_enemies() -> void:
+	var count   := ENEMY_COUNT_MIN + randi() % (ENEMY_COUNT_MAX - ENEMY_COUNT_MIN + 1)
+	var spawn_w := Vector2((spawn.x + 0.5) * TILE, (spawn.y + 0.5) * TILE)
+	var attempts := 0
+	while enemies.size() < count and attempts < 5000:
+		attempts += 1
+		var tx : int = 2 + randi() % (MAP_W - 4)
+		var ty : int = 2 + randi() % (MAP_H - 4)
+		if tiles[ty][tx] != 0: continue
+		var ep := Vector2((tx + 0.5) * TILE, (ty + 0.5) * TILE)
+		if ep.distance_to(spawn_w) < TILE * 8.0: continue
+		enemies.append({
+			"pos":            ep,
+			"hp":             ENEMY_HP,
+			"state":          0,          # PATROL
+			"patrol_target":  ep,
+			"fire_cd":        randf() * ENEMY_FIRE_RATE,
+			"facing":         randf() * TAU,
+		})
+
+# ─── Enemy AI update ──────────────────────────────────────────────────────────
+func _update_enemies(delta: float) -> void:
+	var alive : Array = []
+	for e in enemies:
+		# ── Bullet hit check: player bullets vs this enemy ─────────────────────
+		var hit := false
+		var surviving_bullets : Array = []
+		for b in bullets:
+			var bp : Vector2 = b["pos"]
+			if bp.distance_to(e["pos"]) < ENEMY_R + 4.0:
+				e["hp"] -= 20
+				hit = true
+			else:
+				surviving_bullets.append(b)
+		if hit:
+			bullets = surviving_bullets
+		if e["hp"] <= 0:
+			continue   # enemy dead — drop from list
+
+		var ep    : Vector2 = e["pos"]
+		var dist  : float   = ep.distance_to(player_pos)
+
+		# ── State transitions ──────────────────────────────────────────────────
+		if dist <= ENEMY_SENSE_R:
+			e["state"] = 2 if dist <= ENEMY_SHOOT_R else 1
+		elif dist > ENEMY_CHASE_R:
+			e["state"] = 0
+
+		match int(e["state"]):
+			0:   # PATROL
+				_enemy_patrol(e, delta)
+			1:   # CHASE
+				_enemy_move_toward(e, player_pos, ENEMY_SPD, delta)
+				e["facing"] = (player_pos - ep).angle()
+			2:   # SHOOT
+				# Keep a comfortable distance
+				if dist < ENEMY_SHOOT_R * 0.5:
+					_enemy_move_toward(e, player_pos, -ENEMY_SPD, delta)
+				elif dist > ENEMY_SHOOT_R * 0.85:
+					_enemy_move_toward(e, player_pos, ENEMY_SPRINT_SPD, delta)
+				e["facing"] = (player_pos - ep).angle()
+				e["fire_cd"] -= delta
+				if e["fire_cd"] <= 0.0:
+					e["fire_cd"] = ENEMY_FIRE_RATE
+					var spread := randf_range(-0.12, 0.12)
+					var a      := float(e["facing"]) + spread
+					enemy_bullets.append({
+						"pos":      Vector2(e["pos"]),
+						"dir":      Vector2(cos(a), sin(a)),
+						"traveled": 0.0,
+					})
+
+		alive.append(e)
+	enemies = alive
+
+func _enemy_patrol(e: Dictionary, delta: float) -> void:
+	var ep : Vector2 = e["pos"]
+	var pt : Vector2 = e["patrol_target"]
+	if ep.distance_to(pt) < 6.0 or _is_wall(pt):
+		# Pick a new random patrol point within ~8 tiles
+		for _t in range(20):
+			var dx := randf_range(-TILE * 6.0, TILE * 6.0)
+			var dy := randf_range(-TILE * 6.0, TILE * 6.0)
+			var np := ep + Vector2(dx, dy)
+			var tx := int(np.x / TILE); var ty := int(np.y / TILE)
+			if tx >= 0 and tx < MAP_W and ty >= 0 and ty < MAP_H and tiles[ty][tx] == 0:
+				e["patrol_target"] = np
+				break
+	_enemy_move_toward(e, e["patrol_target"], ENEMY_SPD * 0.6, delta)
+	e["facing"] = (Vector2(e["patrol_target"]) - ep).angle()
+
+func _enemy_move_toward(e: Dictionary, target: Vector2, spd: float, delta: float) -> void:
+	var ep  : Vector2 = e["pos"]
+	var dir := (target - ep)
+	if dir.length_squared() < 1.0: return
+	dir = dir.normalized()
+	if spd < 0.0:
+		dir = -dir; spd = -spd
+	e["pos"] = MapGen.resolve_collision(ep + dir * spd * delta, ENEMY_R, tiles)
+
+func _is_wall(p: Vector2) -> bool:
+	var tx := int(p.x / TILE); var ty := int(p.y / TILE)
+	if tx < 0 or tx >= MAP_W or ty < 0 or ty >= MAP_H: return true
+	return tiles[ty][tx] == 1
+
+# ─── Enemy bullet update ──────────────────────────────────────────────────────
+func _update_enemy_bullets(delta: float) -> void:
+	var step := BULLET_SPEED * delta
+	var alive : Array = []
+	for b in enemy_bullets:
+		b["pos"]      += (b["dir"] as Vector2) * step
+		b["traveled"] += step
+		if b["traveled"] >= BULLET_RANGE * 0.7: continue
+		var bp : Vector2 = b["pos"]
+		var btx := int(bp.x / TILE); var bty := int(bp.y / TILE)
+		if btx < 0 or btx >= MAP_W or bty < 0 or bty >= MAP_H: continue
+		if tiles[bty][btx] == 1: continue
+		# Hit player
+		if bp.distance_to(player_pos) < PLAYER_R + 4.0:
+			var dmg := ENEMY_DMG
+			if shield > 0:
+				var absorbed := mini(shield, dmg)
+				shield -= absorbed
+				dmg    -= absorbed
+			hp = maxi(0, hp - dmg)
+			continue
+		alive.append(b)
+	enemy_bullets = alive
+
 # ─── Fog polygon (DDA ray sweep) ─────────────────────────────────────────────
 func _view_range() -> float:
 	var vs := get_viewport_rect().size
@@ -242,13 +401,15 @@ func _cast_ray_dda(origin: Vector2, angle: float, vr: float) -> float:
 func _draw() -> void:
 	_draw_tiles()
 	_draw_items()
+	_draw_enemies()
+	_draw_enemy_bullets()
 	_draw_bullets()
 	if extraction_revealed: _draw_extraction()
 	_draw_player()
 
 func _draw_bullets() -> void:
-	const BULLET_W := 3.0   # 宽（垂直飞行方向）
-	const BULLET_L := 10.0  # 长（沿飞行方向）
+	const BULLET_W := 3.0
+	const BULLET_L := 10.0
 	for b in bullets:
 		var bp  : Vector2 = b["pos"]
 		var bd  : Vector2 = b["dir"]
@@ -260,6 +421,38 @@ func _draw_bullets() -> void:
 			bp + fwd - sid,
 			bp - fwd - sid,
 		]), C_BULLET)
+
+func _draw_enemy_bullets() -> void:
+	const BULLET_W := 3.0
+	const BULLET_L := 9.0
+	for b in enemy_bullets:
+		if not _is_point_visible(b["pos"]): continue
+		var bp  : Vector2 = b["pos"]
+		var bd  : Vector2 = b["dir"]
+		var fwd := bd * BULLET_L * 0.5
+		var sid := Vector2(-bd.y, bd.x) * BULLET_W * 0.5
+		draw_colored_polygon(PackedVector2Array([
+			bp - fwd + sid,
+			bp + fwd + sid,
+			bp + fwd - sid,
+			bp - fwd - sid,
+		]), C_ENEMY_BULLET)
+
+func _draw_enemies() -> void:
+	for e in enemies:
+		var ep : Vector2 = e["pos"]
+		if not _is_point_visible(ep): continue
+		var state : int = e["state"]
+		# Soft glow — brighter when aggressive
+		var glow_a := 0.022 if state == 0 else 0.035
+		_soft_glow(ep, ENEMY_R, ENEMY_R * 2.2, glow_a, 16, Color(1.0, 0.25, 0.15))
+		# Body
+		draw_circle(ep, ENEMY_R, Color(0.12, 0.04, 0.04))
+		draw_arc(ep, ENEMY_R, 0.0, TAU, 48,
+			Color(3.0, 0.5, 0.3) if state > 0 else Color(1.5, 0.4, 0.3), 2.0)
+		# Facing dot
+		var fd := Vector2(cos(e["facing"]), sin(e["facing"]))
+		draw_circle(ep + fd * (ENEMY_R - 4.0), 3.0, Color(4.0, 1.0, 0.5))
 
 func _draw_items() -> void:
 	for item in items:
@@ -318,6 +511,7 @@ func _draw_extraction() -> void:
 	if not extraction_visible: return
 	var pulse := 0.5 + 0.5 * sin(_pulse_t * TAU)
 	var r     := TILE * 0.42
+	_soft_glow(Vector2(ex, ey), r, r * 1.4, 0.030 * (0.6 + 0.4 * pulse), 20)
 	draw_circle(Vector2(ex, ey), r, Color(1.0, 1.0, 1.0, 0.10 + 0.07 * pulse))
 	draw_arc(Vector2(ex, ey), r, 0.0, TAU, 64,
 		Color(3.0, 3.0, 3.0, 0.50 + 0.40 * pulse), 2.0)       # HDR → bloom
@@ -329,12 +523,21 @@ func _draw_extraction() -> void:
 func _draw_player() -> void:
 	var p := player_pos
 	_draw_player_ring(p)
-	for i in range(5, 0, -1):
-		var t := float(i) / 5.0
-		draw_circle(p, PLAYER_R * 2.5 * t, Color(1, 1, 1, 0.04 * (1.0 - t + 0.1)))
+	if shield > 0:
+		_soft_glow(p, PLAYER_R, PLAYER_R * 2.8, 0.028 * float(shield) / float(MAX_SHIELD), 20)
 	draw_circle(p, PLAYER_R, Color(0.102, 0.102, 0.102))
 	draw_arc(p, PLAYER_R, 0.0, TAU, 64, Color(3.0, 3.0, 3.0), 2.0)  # HDR → bloom
 	draw_circle(p, 3.5, Color(5.0, 5.0, 5.0))                        # HDR → strong bloom
+
+# Smooth radial glow: `layers` concentric circles from `inner_r` to `inner_r+spread`,
+# peak alpha at `inner_r`, fading to 0 at the outer edge.
+func _soft_glow(center: Vector2, inner_r: float, spread: float,
+		peak_alpha: float, layers: int, col: Color = Color.WHITE) -> void:
+	for i in range(layers, 0, -1):
+		var t   := float(i) / float(layers)
+		var r   := inner_r + t * spread
+		var alp := peak_alpha * (1.0 - t)
+		draw_circle(center, r, Color(col.r, col.g, col.b, alp))
 
 func _draw_player_ring(p: Vector2) -> void:
 	const INNER_R    := PLAYER_R
@@ -342,7 +545,7 @@ func _draw_player_ring(p: Vector2) -> void:
 	const RING_COL   := Color(1.0, 1.0, 1.0, 0.22)
 	const LINE_COL   := Color(1.0, 1.0, 1.0, 0.35)
 	const LINE_W     := 1.2
-	const SPREAD_COL := Color(0.55, 0.55, 0.55, 0.15)
+	const SPREAD_COL := Color(0.90, 0.70, 0.20, 0.18)
 	const SPREAD_SEGS := 16
 
 	# ── 偏移扇区填充（以 facing 轴对称，圆心角 = 2×_current_spread）──────────

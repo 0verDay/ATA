@@ -9,10 +9,10 @@ func _process(_delta: float) -> void:
 func _draw() -> void:
 	var lc := _touch.left_center
 	if _touch.is_sprinting:
-		for i in range(6, 0, -1):
-			var t := float(i) / 6.0
-			draw_arc(lc, TouchInput.LEFT_R + t * 14.0, 0.0, TAU, 64,
-				Color(1.0, 1.0, 1.0, 0.12 * (1.0 - t + 0.1)), 3.0 + t * 2.0)
+		for i in range(20, 0, -1):
+			var t := float(i) / 20.0
+			draw_arc(lc, TouchInput.LEFT_R + t * 20.0, 0.0, TAU, 64,
+				Color(1.0, 1.0, 1.0, 0.06 * (1.0 - t)), 3.0)
 	var ring_col := Color(1.0, 1.0, 1.0, 0.80) if _touch.is_sprinting else Color(1, 1, 1, 0.18)
 	draw_arc(lc, TouchInput.LEFT_R, 0.0, TAU, 64, ring_col, 2.0)
 	var lk := _touch.get_left_knob()

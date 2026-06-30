@@ -108,11 +108,11 @@ func _draw_grid() -> void:
 		y += GRID_STEP
 
 func _draw_base() -> void:
-	# Outer soft glow
-	for i in range(10, 0, -1):
-		var t := float(i) / 10.0
-		draw_arc(BASE_POS, BASE_R + 5.0 + t * 25.0, 0.0, TAU, 64,
-				Color(1.0, 1.0, 1.0, 0.02 * (1.0 - t * 0.5)), 5.0)
+	# Outer soft glow (smooth 20-layer arc)
+	for i in range(20, 0, -1):
+		var t := float(i) / 20.0
+		draw_arc(BASE_POS, BASE_R + t * 30.0, 0.0, TAU, 64,
+				Color(1.0, 1.0, 1.0, 0.018 * (1.0 - t)), 4.0)
 	# Radial gradient: 32 concentric filled circles outer→inner
 	# Colors match JS: edge #060d18 → center #0d1b2a
 	var c_edge   := Color(0.024, 0.047, 0.094)
@@ -180,12 +180,18 @@ func _draw_letter_t(tc: Vector2, w: float, h: float) -> void:
 func _draw_player() -> void:
 	var p := player_pos
 	var r := PLAYER_R
-	# Glow rings
-	for i in range(6, 0, -1):
-		var t := float(i) / 6.0
-		draw_circle(p, r * 2.5 * t, Color(1.0, 1.0, 1.0, 0.05 * (1.0 - t + 0.1)))
+	# Smooth glow
+	_soft_glow(p, r, r * 2.5, 0.035, 20)
 	# Body
 	draw_circle(p, r, Color(0.102, 0.102, 0.102))
 	draw_arc(p, r, 0.0, TAU, 64, Color(3.0, 3.0, 3.0), 2.5)    # HDR → bloom
 	# Center dot
 	draw_circle(p, 4.0, Color(5.0, 5.0, 5.0))                  # HDR → strong bloom
+
+func _soft_glow(center: Vector2, inner_r: float, spread: float,
+		peak_alpha: float, layers: int, col: Color = Color.WHITE) -> void:
+	for i in range(layers, 0, -1):
+		var t   := float(i) / float(layers)
+		var r   := inner_r + t * spread
+		var alp := peak_alpha * (1.0 - t)
+		draw_circle(center, r, Color(col.r, col.g, col.b, alp))
