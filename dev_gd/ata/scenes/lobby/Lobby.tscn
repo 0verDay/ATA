@@ -1,0 +1,50 @@
+[gd_scene load_steps=6 format=3 uid="uid://lobby000001a"]
+
+[ext_resource type="Script" path="res://scripts/Lobby.gd"       id="1_lobby"]
+[ext_resource type="Script" path="res://scripts/TouchInput.gd"  id="2_touch"]
+[ext_resource type="Script" path="res://scripts/LobbyHUD.gd"    id="3_hud"]
+
+[sub_resource type="Environment" id="Env_lobby"]
+glow_enabled = true
+glow_normalized = true
+glow_intensity = 1.2
+glow_bloom = 0.0
+glow_blend_mode = 0
+glow_hdr_threshold = 1.0
+glow_hdr_scale = 2.0
+glow_hdr_luminance_cap = 12.0
+glow_levels/1 = true
+glow_levels/2 = true
+glow_levels/3 = true
+glow_levels/4 = true
+glow_levels/5 = true
+glow_levels/6 = false
+glow_levels/7 = false
+
+[node name="Lobby" type="Node2D"]
+script = ExtResource("1_lobby")
+
+[node name="Camera2D" type="Camera2D" parent="."]
+position_smoothing_enabled = false
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Env_lobby")
+
+[node name="UI" type="CanvasLayer" parent="."]
+
+[node name="EntryBtn" type="Button" parent="UI"]
+anchor_left = 0.5
+anchor_top = 1.0
+anchor_right = 0.5
+anchor_bottom = 1.0
+offset_left = -90.0
+offset_top = -90.0
+offset_right = 90.0
+offset_bottom = -46.0
+text = "进入战局"
+
+[node name="TouchInput" type="Node" parent="UI"]
+script = ExtResource("2_touch")
+
+[node name="HUDDraw" type="Node2D" parent="UI"]
+script = ExtResource("3_hud")
