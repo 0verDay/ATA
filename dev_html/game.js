@@ -115,4 +115,6 @@ function loop(ts) {
 
   requestAnimationFrame(loop);
 }
-requestAnimationFrame(loop);
+
+// Start loop only after all scripts are loaded and parsed
+window.addEventListener('load', () => requestAnimationFrame(loop));

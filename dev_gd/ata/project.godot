@@ -18,6 +18,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 GameData="*res://scripts/GameData.gd"
+UITheme="*res://scripts/UITheme.gd"
 
 [display]
 
@@ -32,5 +33,5 @@ window/stretch/aspect="expand"
 
 rendering_device/driver.windows="d3d12"
 textures/vram_compression/import_etc2_astc=true
-environment/defaults/default_clear_color=Color(0.027, 0.027, 0.059, 1)
 viewport/hdr_2d=true
+environment/defaults/default_clear_color=Color(0.027, 0.027, 0.059, 1)
