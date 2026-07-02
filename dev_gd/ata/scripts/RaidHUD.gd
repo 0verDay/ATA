@@ -10,7 +10,7 @@ const INV_CELL := 64
 const INV_PAD  := 30
 
 const INV_SMALL_COLS := 4
-const INV_SMALL_ROWS := 2
+const INV_SMALL_ROWS := 1
 
 # ─── Inventory overlay toggle ─────────────────────────────────────────────────
 var _inv_open  : bool      = false
